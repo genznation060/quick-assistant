@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<voice-interaction-service 
+<voice-interaction-service
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:sessionService="com.example.assistant.MyAssistantSessionService"
     android:recognitionService="com.example.assistant.MyRecognitionService"
-    android:supportsAssist="true" />
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />
