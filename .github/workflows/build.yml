@@ -27,8 +27,11 @@ jobs:
         with:
           gradle-version: '8.6'
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace --no-daemon
+      - name: Generate Wrapper and Build APK
+        run: |
+          gradle wrapper --gradle-version 8.6
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
