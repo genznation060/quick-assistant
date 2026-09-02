@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.service.voice.VoiceInteractionService
 import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
+import android.speech.RecognitionService
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -23,6 +24,13 @@ class MyAssistantSessionService : VoiceInteractionSessionService() {
     override fun onNewSession(args: Bundle?): VoiceInteractionSession {
         return CustomSession(this)
     }
+}
+
+// Dummy recognition service required by Android system settings
+class MyRecognitionService : RecognitionService() {
+    override fun onStartListening(recognizerIntent: Intent?, listener: Callback?) {}
+    override fun onCancel(listener: Callback?) {}
+    override fun onStopListening(listener: Callback?) {}
 }
 
 class CustomSession(context: Context) : VoiceInteractionSession(context) {
@@ -55,22 +63,22 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         val layout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(32, 32, 32, 32)
-            setBackgroundColor(-0x1)
+            setPadding(48, 48, 48, 48)
+            setBackgroundColor(-0x1) // White background
         }
 
         val copyBtn = Button(context).apply {
-            this.text = "Copy Screen Text"
+            this.text = "Copy Text"
             setOnClickListener {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("Screen Text", text))
-                Toast.makeText(context, "Copied all screen text!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Copied screen text!", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
 
         val searchBtn = Button(context).apply {
-            this.text = "Google Search"
+            this.text = "Search Google"
             setOnClickListener {
                 val query = Uri.encode(text.take(200))
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query")).apply {
@@ -90,8 +98,12 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val intent = Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
-        startActivity(intent)
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Please select Quick Assistant in Default Apps", Toast.LENGTH_LONG).show()
+        }
         finish()
     }
 }
