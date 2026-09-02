@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
-        android:icon="@android:drawable/ic_menu_search"
         android:label="Quick Assistant"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:icon="@android:drawable/ic_menu_search"
+        android:theme="@style/AppTheme">
 
-        <!-- 1. The Voice Interaction Service -->
         <service
             android:name=".MyAssistantService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
@@ -20,24 +26,11 @@
             </intent-filter>
         </service>
 
-        <!-- 2. The Session Service -->
         <service
             android:name=".MyAssistantSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
 
-        <!-- 3. Mandatory Recognition Service stub (Required by Android 10+ / MIUI to list as Assistant) -->
-        <service
-            android:name=".MyRecognitionService"
-            android:permission="android.permission.BIND_RECOGNITION_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.speech.RecognitionService" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </service>
-
-        <!-- 4. Launcher & Assist Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -50,6 +43,5 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
     </application>
 </manifest>
