@@ -1,109 +1,18 @@
-package com.example.assistant
-
-import android.app.assist.AssistContent
-import android.app.assist.AssistStructure
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.Bundle
-import android.service.voice.VoiceInteractionService
-import android.service.voice.VoiceInteractionSession
-import android.service.voice.VoiceInteractionSessionService
-import android.speech.RecognitionService
-import android.view.Gravity
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-
-class MyAssistantService : VoiceInteractionService()
-
-class MyAssistantSessionService : VoiceInteractionSessionService() {
-    override fun onNewSession(args: Bundle?): VoiceInteractionSession {
-        return CustomSession(this)
-    }
-}
-
-// Dummy recognition service required by Android system settings
-class MyRecognitionService : RecognitionService() {
-    override fun onStartListening(recognizerIntent: Intent?, listener: Callback?) {}
-    override fun onCancel(listener: Callback?) {}
-    override fun onStopListening(listener: Callback?) {}
-}
-
-class CustomSession(context: Context) : VoiceInteractionSession(context) {
-
-    override fun onHandleAssist(data: Bundle?, structure: AssistStructure?, content: AssistContent?) {
-        super.onHandleAssist(data, structure, content)
-        val extractedText = StringBuilder()
-        
-        structure?.let { struct ->
-            for (i in 0 until struct.windowNodeCount) {
-                traverseNode(struct.getWindowNodeAt(i).rootViewNode, extractedText)
-            }
-        }
-
-        val allText = extractedText.toString().trim()
-        showAssistantSheet(allText)
-    }
-
-    private fun traverseNode(node: AssistStructure.ViewNode?, builder: StringBuilder) {
-        if (node == null) return
-        node.text?.let {
-            if (it.isNotBlank()) builder.append(it).append("\n")
-        }
-        for (i in 0 until node.childCount) {
-            traverseNode(node.getChildAt(i), builder)
-        }
-    }
-
-    private fun showAssistantSheet(text: String) {
-        val layout = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(48, 48, 48, 48)
-            setBackgroundColor(-0x1) // White background
-        }
-
-        val copyBtn = Button(context).apply {
-            this.text = "Copy Text"
-            setOnClickListener {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Screen Text", text))
-                Toast.makeText(context, "Copied screen text!", Toast.LENGTH_SHORT).show()
-                finish()
-            }
-        }
-
-        val searchBtn = Button(context).apply {
-            this.text = "Search Google"
-            setOnClickListener {
-                val query = Uri.encode(text.take(200))
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query")).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-                finish()
-            }
-        }
-
-        layout.addView(copyBtn)
-        layout.addView(searchBtn)
-        setContentView(layout)
-    }
-}
-
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        try {
-            val intent = Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Please select Quick Assistant in Default Apps", Toast.LENGTH_LONG).show()
+        val button = Button(this).apply {
+            text = "Set as default assistant"
+            setOnClickListener {
+                startActivity(Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS))
+            }
         }
-        finish()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(48, 48, 48, 48)
+            addView(button)
+        }
+        setContentView(layout)
     }
 }
