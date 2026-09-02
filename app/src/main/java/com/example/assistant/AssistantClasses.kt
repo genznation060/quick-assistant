@@ -1,285 +1,295 @@
 package com.example.assistant
 
-import android.app.SearchManager
-import android.app.assist.AssistContent
-import android.app.assist.AssistStructure
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.Bundle
-import android.service.voice.VoiceInteractionService
-import android.service.voice.VoiceInteractionSession
-import android.service.voice.VoiceInteractionSessionService
-import android.speech.RecognitionService
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.ImageView
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+import java.net.URLEncoder
+import java.util.concurrent.CopyOnWriteArrayList
 
-class MyAssistantService : VoiceInteractionService()
+class AssistantService : AccessibilityService() {
 
-class MyAssistantSessionService : VoiceInteractionSessionService() {
-    override fun onNewSession(args: Bundle?): VoiceInteractionSession {
-        return CustomSession(this)
+    private val TAG = "QuickAssistant"
+    private lateinit var windowManager: WindowManager
+    private var chipBar: LinearLayout? = null
+    private var overlayView: View? = null
+
+    // Multi-select state
+    private val selectedNodes = CopyOnWriteArrayList<AccessibilityNodeInfo>()
+    private val selectedTexts = CopyOnWriteArrayList<String>()
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Chips we never want to show
+    private val junkKeywords = setOf(
+        "google", "ai", "mode", "assistant", "bard", "gemini",
+        "chatgpt", "copilot", "search with", "ask"
+    )
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+        val info = AccessibilityServiceInfo().apply {
+            eventTypes = AccessibilityEvent.TYPE_VIEW_CLICKED or
+                    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
+                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED or
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+            flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                    AccessibilityServiceInfo.FLAG_REQUEST_ENHANCED_WEB_ACCESSIBILITY
+            notificationTimeout = 50
+        }
+        serviceInfo = info
+        Log.d(TAG, "Service connected")
     }
-}
 
-class MyRecognitionService : RecognitionService() {
-    override fun onStartListening(recognizerIntent: Intent?, listener: Callback?) {}
-    override fun onCancel(listener: Callback?) {}
-    override fun onStopListening(listener: Callback?) {}
-}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
 
-data class ScreenTextItem(val text: String, val rect: Rect)
-
-class CustomSession(context: Context) : VoiceInteractionSession(context) {
-
-    private val textItems = ArrayList<ScreenTextItem>()
-    private val selectedItems = mutableSetOf<ScreenTextItem>()
-
-    private lateinit var rootLayout: FrameLayout
-    private lateinit var highlightOverlay: View
-    private lateinit var floatingPill: LinearLayout
-
-    override fun onCreate() {
-        super.onCreate()
-        window?.window?.let { win ->
-            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            win.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
-            win.addFlags(
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-            )
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_VIEW_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
+                val source = event.source ?: return
+                handleNodeTap(source)
+                source.recycle()
+            }
         }
     }
 
-    override fun onCreateContentView(): View {
-        rootLayout = FrameLayout(context).apply {
-            setBackgroundColor(Color.parseColor("#44000000")) 
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
+    private fun handleNodeTap(node: AccessibilityNodeInfo) {
+        val text = extractCleanText(node)
+        if (text.isBlank() || text.length > 120) return
+
+        // Toggle selection
+        val alreadySelected = selectedNodes.any { it == node || it.text == node.text }
+        if (alreadySelected) {
+            // Deselect
+            val idx = selectedNodes.indexOfFirst { it.text == node.text }
+            if (idx >= 0) {
+                selectedNodes.removeAt(idx)
+                selectedTexts.removeAt(idx)
+            }
+        } else {
+            // Select
+            selectedNodes.add(AccessibilityNodeInfo.obtain(node))
+            selectedTexts.add(text)
         }
 
-        // Draws blue highlight boxes over ALL selected text items
-        highlightOverlay = object : View(context) {
-            val bgPaint = Paint().apply {
-                color = Color.parseColor("#4D3B82F6")
-                style = Paint.Style.FILL
-                isAntiAlias = true
+        updateChipBar()
+    }
+
+    private fun extractCleanText(node: AccessibilityNodeInfo): String {
+        val raw = node.text?.toString()
+            ?: node.contentDescription?.toString()
+            ?: return ""
+
+        // Avoid single-character junk and common UI labels
+        if (raw.length <= 1) return ""
+        if (raw.matches(Regex("^[\\d\\W]+$"))) return ""
+
+        return raw.trim()
+            .replace(Regex("\\s+"), " ")
+            .take(200)
+    }
+
+    private fun getCombinedSelection(): String {
+        return selectedTexts.joinToString(" ").trim()
+    }
+
+    private fun updateChipBar() {
+        handler.post {
+            removeChipBar()
+
+            val combined = getCombinedSelection()
+            if (combined.isBlank()) return@post
+
+            val density = resources.displayMetrics.density
+            val barHeight = (56 * density).toInt()
+
+            // Root horizontal scroll so many chips fit
+            val scroll = HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                setBackgroundColor(Color.TRANSPARENT)
             }
 
-            override fun onDraw(canvas: Canvas) {
-                super.onDraw(canvas)
-                for (item in selectedItems) {
-                    val r = item.rect
-                    canvas.drawRoundRect(
-                        (r.left - 8).toFloat(),
-                        (r.top - 4).toFloat(),
-                        (r.right + 8).toFloat(),
-                        (r.bottom + 4).toFloat(),
-                        10f, 10f, bgPaint
-                    )
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(
+                    (12 * density).toInt(),
+                    (8 * density).toInt(),
+                    (12 * density).toInt(),
+                    (8 * density).toInt()
+                )
+                setBackgroundColor(Color.parseColor("#F0F0F0"))
+            }
+
+            // Always show these primary actions
+            addChip(container, "Search", Color.parseColor("#1A73E8")) {
+                openGoogleSearch(combined)
+            }
+            addChip(container, "Explain", Color.parseColor("#0F9D58")) {
+                openGoogleSearch("explain: $combined")
+            }
+            addChip(container, "Copy", Color.parseColor("#5F6368")) {
+                copyToClipboard(combined)
+            }
+
+            // Optional extra useful chips (filtered)
+            val extras = listOf("Translate", "Define", "Wiki")
+            extras.forEach { label ->
+                if (!isJunk(label)) {
+                    addChip(container, label, Color.parseColor("#EA4335")) {
+                        when (label) {
+                            "Translate" -> openGoogleSearch("translate: $combined")
+                            "Define" -> openGoogleSearch("define: $combined")
+                            "Wiki" -> openGoogleSearch("$combined site:wikipedia.org")
+                        }
+                    }
                 }
             }
+
+            scroll.addView(container)
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else
+                    WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM
+                // Critical: lift the bar above the system navigation bar
+                y = getNavigationBarHeight() + (8 * density).toInt()
+            }
+
+            try {
+                windowManager.addView(scroll, params)
+                chipBar = container
+                overlayView = scroll
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add chip bar", e)
+            }
         }
-        rootLayout.addView(highlightOverlay)
+    }
 
-        // Floating Action Pill
-        floatingPill = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(28, 14, 28, 14)
-            visibility = View.GONE
-            elevation = 24f
+    private fun addChip(parent: LinearLayout, label: String, color: Int, onClick: () -> Unit) {
+        val density = resources.displayMetrics.density
 
+        val chip = TextView(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setPadding(
+                (16 * density).toInt(),
+                (10 * density).toInt(),
+                (16 * density).toInt(),
+                (10 * density).toInt()
+            )
             background = GradientDrawable().apply {
-                setColor(Color.WHITE)
-                cornerRadius = 80f
+                cornerRadius = 24 * density
+                setColor(color)
             }
-
-            // 1. Copy Icon
-            val copyBtn = ImageView(context).apply {
-                setImageResource(android.R.drawable.ic_menu_save)
-                setColorFilter(Color.parseColor("#424242"))
-                setPadding(12, 12, 20, 12)
-                setOnClickListener {
-                    val combinedText = getCombinedSelectedText()
-                    if (combinedText.isNotEmpty()) {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Copied Text", combinedText))
-                        Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
-                    }
-                    hide()
-                }
+            setOnClickListener {
+                onClick()
+                // Keep selection after action (user can clear by tapping again)
             }
-
-            val divider = View(context).apply {
-                layoutParams = LinearLayout.LayoutParams(2, 44)
-                setBackgroundColor(Color.parseColor("#E5E7EB"))
-            }
-
-            // 2. Google Search Icon
-            val searchBtn = ImageView(context).apply {
-                setImageResource(android.R.drawable.ic_menu_search)
-                setColorFilter(Color.parseColor("#1A73E8"))
-                setPadding(20, 12, 12, 12)
-                setOnClickListener {
-                    val query = getCombinedSelectedText()
-                    if (query.isNotEmpty()) {
-                        val googleAppIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
-                            putExtra(SearchManager.QUERY, query)
-                            setPackage("com.google.android.googlequicksearchbox")
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        try {
-                            context.startActivity(googleAppIntent)
-                        } catch (e: Exception) {
-                            val browserIntent = Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse("https://www.google.com/search?q=" + Uri.encode(query))
-                            ).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(browserIntent)
-                        }
-                    }
-                    hide()
-                }
-            }
-
-            addView(copyBtn)
-            addView(divider)
-            addView(searchBtn)
-        }
-        rootLayout.addView(floatingPill)
-
-        // Handle Touch for Multi-Selection
-        rootLayout.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                val touchX = event.rawX.toInt()
-                val touchY = event.rawY.toInt()
-
-                val hit = textItems.find { it.rect.contains(touchX, touchY) }
-
-                if (hit != null) {
-                    // Toggle selection state
-                    if (selectedItems.contains(hit)) {
-                        selectedItems.remove(hit)
-                    } else {
-                        selectedItems.add(hit)
-                    }
-                    
-                    highlightOverlay.invalidate()
-
-                    if (selectedItems.isNotEmpty()) {
-                        floatingPill.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
-                        val pillWidth = floatingPill.measuredWidth
-                        val pillHeight = floatingPill.measuredHeight
-                        val screenHeight = context.resources.displayMetrics.heightPixels
-                        val screenWidth = context.resources.displayMetrics.widthPixels
-
-                        // Position pill near the most recently tapped item
-                        var targetX = hit.rect.centerX() - (pillWidth / 2)
-                        var targetY = hit.rect.top - pillHeight - 24
-
-                        targetX = targetX.coerceIn(24, screenWidth - pillWidth - 24)
-                        
-                        if (targetY < 120) {
-                            targetY = hit.rect.bottom + 28
-                        }
-                        
-                        // FIX: Prevent pill from falling behind bottom navigation bar
-                        val maxBottomY = screenHeight - pillHeight - 200 
-                        targetY = targetY.coerceAtMost(maxBottomY)
-
-                        floatingPill.x = targetX.toFloat()
-                        floatingPill.y = targetY.toFloat()
-                        floatingPill.visibility = View.VISIBLE
-                    } else {
-                        floatingPill.visibility = View.GONE
-                    }
-                } else {
-                    // Tapping blank space clears selection or closes assistant
-                    if (selectedItems.isNotEmpty()) {
-                        selectedItems.clear()
-                        highlightOverlay.invalidate()
-                        floatingPill.visibility = View.GONE
-                    } else {
-                        hide()
-                    }
-                }
-            }
-            true
         }
 
-        return rootLayout
+        val lp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginEnd = (8 * density).toInt()
+        }
+        parent.addView(chip, lp)
     }
 
-    override fun onHandleAssist(data: Bundle?, structure: AssistStructure?, content: AssistContent?) {
-        super.onHandleAssist(data, structure, content)
-        textItems.clear()
-        selectedItems.clear()
-        highlightOverlay.invalidate()
-        floatingPill.visibility = View.GONE
-
-        structure?.let { struct ->
-            for (i in 0 until struct.windowNodeCount) {
-                val windowNode = struct.getWindowNodeAt(i)
-                traverseNode(windowNode.rootViewNode, windowNode.left, windowNode.top)
-            }
-        }
+    private fun isJunk(label: String): Boolean {
+        val lower = label.lowercase()
+        return junkKeywords.any { lower.contains(it) }
     }
 
-    private fun traverseNode(node: AssistStructure.ViewNode?, windowLeft: Int, windowTop: Int) {
-        if (node == null || node.visibility != View.VISIBLE) return
-
-        val text = node.text?.toString()?.trim()
-        // Filter out junk/empty nodes (must be longer than 1 character to be considered standalone text)
-        if (!text.isNullOrBlank() && text.length > 1) {
-            val left = windowLeft + node.left
-            val top = windowTop + node.top
-            val right = left + node.width
-            val bottom = top + node.height
-            textItems.add(ScreenTextItem(text, Rect(left, top, right, bottom)))
-        }
-
-        for (i in 0 until node.childCount) {
-            traverseNode(node.getChildAt(i), windowLeft, windowTop)
-        }
+    private fun getNavigationBarHeight(): Int {
+        val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
     }
 
-    // Helper to sort text items by visual position (top-to-bottom, left-to-right) and join them
-    private fun getCombinedSelectedText(): String {
-        return selectedItems
-            .sortedWith(compareBy({ it.rect.top }, { it.rect.left }))
-            .joinToString(" ") { it.text }
-    }
-}
-
-class MainActivity : AppCompatActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    private fun openGoogleSearch(query: String) {
         try {
-            val intent = Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$encoded")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(this, "Please select Quick Assistant in Default Apps", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cannot open search", Toast.LENGTH_SHORT).show()
         }
-        finish()
+    }
+
+    private fun copyToClipboard(text: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("selected", text))
+        Toast.makeText(this, "Copied: \( {text.take(40)} \){if (text.length > 40) "…" else ""}", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun removeChipBar() {
+        overlayView?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {}
+        }
+        overlayView = null
+        chipBar = null
+    }
+
+    fun clearSelection() {
+        selectedNodes.forEach { it.recycle() }
+        selectedNodes.clear()
+        selectedTexts.clear()
+        removeChipBar()
+    }
+
+    override fun onInterrupt() {
+        clearSelection()
+    }
+
+    override fun onDestroy() {
+        clearSelection()
+        super.onDestroy()
+    }
+}
+
+// Simple helper for any Activity that wants to force-clear selection
+object AssistantHelper {
+    fun clear(service: AssistantService?) {
+        service?.clearSelection()
     }
 }
