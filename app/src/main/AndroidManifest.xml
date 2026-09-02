@@ -6,6 +6,10 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.WEB_SEARCH" />
+        </intent>
+        <package android:name="com.google.android.googlequicksearchbox" />
     </queries>
 
     <application
@@ -30,6 +34,18 @@
             android:name=".MyAssistantSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
+
+        <service
+            android:name=".MyRecognitionService"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
 
         <activity
             android:name=".MainActivity"
