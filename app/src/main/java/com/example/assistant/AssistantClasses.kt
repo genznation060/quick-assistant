@@ -1,5 +1,6 @@
 package com.example.assistant
 
+import android.app.assist.AssistContent
 import android.app.assist.AssistStructure
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -30,7 +31,6 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         super.onHandleAssist(data, structure, content)
         val extractedText = StringBuilder()
         
-        // Extract all readable text nodes currently on screen
         structure?.let { struct ->
             for (i in 0 until struct.windowNodeCount) {
                 traverseNode(struct.getWindowNodeAt(i).rootViewNode, extractedText)
@@ -56,7 +56,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(32, 32, 32, 32)
-            setBackgroundColor(-0x1) // White background
+            setBackgroundColor(-0x1)
         }
 
         val copyBtn = Button(context).apply {
@@ -72,7 +72,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         val searchBtn = Button(context).apply {
             this.text = "Google Search"
             setOnClickListener {
-                val query = Uri.encode(text.take(200)) // Take first part of text
+                val query = Uri.encode(text.take(200))
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query")).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
@@ -90,7 +90,6 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Directs the user to set this app as Default Assistant
         val intent = Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
         startActivity(intent)
         finish()
