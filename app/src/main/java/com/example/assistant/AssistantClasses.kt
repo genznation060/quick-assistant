@@ -299,7 +299,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             addView(chipsRow)
         }
 
-        // ===== SAME STYLE BUTTONS + NEW USEFUL ONES =====
+        // ===== BUTTONS =====
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -321,6 +321,22 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
                 explainSelected()
             })
             addView(gap(d))
+            addView(roundAction("Summarize", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
+                summarizeSelected()
+            })
+            addView(gap(d))
+            addView(roundAction("Search YT", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
+                searchYouTube()
+            })
+            addView(gap(d))
+            addView(roundAction("Define", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
+                defineSelected()
+            })
+            addView(gap(d))
+            addView(roundAction("Fact Check", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
+                factCheckSelected()
+            })
+            addView(gap(d))
             addView(roundAction("Translate", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
                 translateSelected()
             })
@@ -330,7 +346,6 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             })
         }
 
-        // Make the action row scrollable if needed
         val actionsScroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             addView(actions)
@@ -341,7 +356,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             setBackgroundColor(Color.WHITE)
             elevation = 16f
             addView(TextView(context).apply {
-                text = "Tap words → Copy / Lens / Search / Explain / Translate / Share"
+                text = "Tap words → Copy / Lens / Search / Explain / Summarize / Search YT..."
                 setTextColor(Color.parseColor("#5F6368"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (4 * d).toInt())
@@ -391,10 +406,10 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         return TextView(context).apply {
             text = label
             setTextColor(fg)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             gravity = Gravity.CENTER
             minHeight = (44 * d).toInt()
-            setPadding((20 * d).toInt(), (10 * d).toInt(), (20 * d).toInt(), (10 * d).toInt())
+            setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (10 * d).toInt())
             background = GradientDrawable().apply {
                 setColor(bg)
                 cornerRadius = 40f
@@ -581,7 +596,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         finish()
     }
 
-    // ========== NEW USEFUL ACTIONS ==========
+    // ========== NEW ACTIONS ==========
 
     private fun explainSelected() {
         val text = selectedQuery()
@@ -590,6 +605,47 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             return
         }
         searchGoogle("explain $text")
+    }
+
+    private fun summarizeSelected() {
+        val text = selectedQuery()
+        if (text.isBlank()) {
+            Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        searchGoogle("summarize $text")
+    }
+
+    private fun searchYouTube() {
+        val text = selectedQuery()
+        if (text.isBlank()) {
+            Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(text)}")
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, uri)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        )
+        finish()
+    }
+
+    private fun defineSelected() {
+        val text = selectedQuery()
+        if (text.isBlank()) {
+            Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        searchGoogle("define $text")
+    }
+
+    private fun factCheckSelected() {
+        val text = selectedQuery()
+        if (text.isBlank()) {
+            Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        searchGoogle("fact check $text")
     }
 
     private fun translateSelected() {
@@ -667,7 +723,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         val body = TextView(this).apply {
-            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Copy, Lens, Search, Explain..."
+            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Use the action buttons"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setTextColor(Color.parseColor("#3C4043"))
             setPadding(0, (16 * d).toInt(), 0, (24 * d).toInt())
