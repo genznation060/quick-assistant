@@ -95,6 +95,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     private lateinit var highlightView: HighlightView
     private lateinit var chipsRow: LinearLayout
     private lateinit var bottom: LinearLayout
+    private lateinit var floatingBar: LinearLayout   // the dark pill bar
 
     private val chrome = setOf(
         "google", "search", "ai", "mode", "all", "images", "videos", "shopping",
@@ -264,6 +265,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         }
         root.addView(highlightView)
 
+        // Close button
         val close = TextView(context).apply {
             text = "✕"
             setTextColor(Color.WHITE)
@@ -290,6 +292,47 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             }
         )
 
+        // ========== FLOATING DARK PILL BAR (like Circle to Search) ==========
+        floatingBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding((10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt(), (8 * d).toInt())
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#2C2C2E"))
+                cornerRadius = 50f
+            }
+            elevation = 20f
+            visibility = View.GONE
+        }
+
+        fun pill(label: String, onClick: () -> Unit): TextView {
+            return TextView(context).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding((14 * d).toInt(), (10 * d).toInt(), (14 * d).toInt(), (10 * d).toInt())
+                setOnClickListener { onClick() }
+            }
+        }
+
+        floatingBar.addView(pill("Copy") { copySelected() })
+        floatingBar.addView(pill("Share") { shareSelected() })
+        floatingBar.addView(pill("Translate") { translateSelected() })
+        floatingBar.addView(pill("All") { selectAllVisible() })
+        floatingBar.addView(pill("Cancel") { clearSelection() })
+
+        root.addView(
+            floatingBar,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
+                topMargin = statusPad + (60 * d).toInt()
+            }
+        )
+
+        // ========== BOTTOM PANEL (your original style) ==========
         chipsRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -299,51 +342,30 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             addView(chipsRow)
         }
 
-        // ===== BUTTONS =====
         val actions = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(0, (10 * d).toInt(), 0, 0)
 
-            addView(roundAction("Copy", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                copySelected()
-            })
+            addView(roundAction("Copy", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { copySelected() })
             addView(gap(d))
-            addView(roundAction("Lens", Color.parseColor("#1A73E8"), Color.WHITE) {
-                openLensInFront()
-            })
+            addView(roundAction("Lens", Color.parseColor("#1A73E8"), Color.WHITE) { openLensInFront() })
             addView(gap(d))
-            addView(roundAction("Search", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                searchGoogle(selectedQuery())
-            })
+            addView(roundAction("Search", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { searchGoogle(selectedQuery()) })
             addView(gap(d))
-            addView(roundAction("Explain", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                explainSelected()
-            })
+            addView(roundAction("Explain", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { explainSelected() })
             addView(gap(d))
-            addView(roundAction("Summarize", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                summarizeSelected()
-            })
+            addView(roundAction("Summarize", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { summarizeSelected() })
             addView(gap(d))
-            addView(roundAction("Search YT", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                searchYouTube()
-            })
+            addView(roundAction("Search YT", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { searchYouTube() })
             addView(gap(d))
-            addView(roundAction("Define", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                defineSelected()
-            })
+            addView(roundAction("Define", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { defineSelected() })
             addView(gap(d))
-            addView(roundAction("Fact Check", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                factCheckSelected()
-            })
+            addView(roundAction("Fact Check", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { factCheckSelected() })
             addView(gap(d))
-            addView(roundAction("Translate", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                translateSelected()
-            })
+            addView(roundAction("Translate", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { translateSelected() })
             addView(gap(d))
-            addView(roundAction("Share", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                shareSelected()
-            })
+            addView(roundAction("Share", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) { shareSelected() })
         }
 
         val actionsScroll = HorizontalScrollView(context).apply {
@@ -356,7 +378,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             setBackgroundColor(Color.WHITE)
             elevation = 16f
             addView(TextView(context).apply {
-                text = "Tap words → Copy / Lens / Search / Explain / Summarize / Search YT..."
+                text = "Tap words to select • Floating bar + full actions below"
                 setTextColor(Color.parseColor("#5F6368"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (4 * d).toInt())
@@ -446,6 +468,11 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     private fun refreshUi() {
         if (::highlightView.isInitialized) highlightView.invalidate()
         refreshChips()
+
+        // Show / hide the floating dark pill bar
+        if (::floatingBar.isInitialized) {
+            floatingBar.visibility = if (selected.isNotEmpty()) View.VISIBLE else View.GONE
+        }
     }
 
     private fun refreshChips() {
@@ -509,6 +536,17 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         } catch (_: Exception) {
         }
         ClipboardActivity.copy(context, q)
+    }
+
+    private fun selectAllVisible() {
+        selected.clear()
+        selected.addAll(textItems.filter { !isChrome(it.text) })
+        refreshUi()
+    }
+
+    private fun clearSelection() {
+        selected.clear()
+        refreshUi()
     }
 
     private fun openLensInFront() {
@@ -584,19 +622,27 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             context.startActivity(
                 Intent(Intent.ACTION_WEB_SEARCH).apply {
                     putExtra(SearchManager.QUERY, query)
+                    setPackage("com.google.android.googlequicksearchbox")
                     addFlags(flags)
                 }
             )
         } catch (_: Exception) {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(query)))
-                    .addFlags(flags)
-            )
+            try {
+                context.startActivity(
+                    Intent(Intent.ACTION_WEB_SEARCH).apply {
+                        putExtra(SearchManager.QUERY, query)
+                        addFlags(flags)
+                    }
+                )
+            } catch (_: Exception) {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(query)))
+                        .addFlags(flags)
+                )
+            }
         }
         finish()
     }
-
-    // ========== NEW ACTIONS ==========
 
     private fun explainSelected() {
         val text = selectedQuery()
@@ -648,19 +694,50 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         searchGoogle("fact check $text")
     }
 
+    // Improved Translate → prefers Google app / Google Translate
     private fun translateSelected() {
         val text = selectedQuery()
         if (text.isBlank()) {
             Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
             return
         }
+
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+
+        // 1. Try Google Translate app
+        val translateApp = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            setPackage("com.google.android.apps.translate")
+            addFlags(flags)
+        }
+
+        // 2. Try Google app search for translation
+        val googleSearch = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra(SearchManager.QUERY, "translate $text")
+            setPackage("com.google.android.googlequicksearchbox")
+            addFlags(flags)
+        }
+
+        try {
+            context.startActivity(translateApp)
+            finish()
+            return
+        } catch (_: Exception) {
+        }
+
+        try {
+            context.startActivity(googleSearch)
+            finish()
+            return
+        } catch (_: Exception) {
+        }
+
+        // Fallback to browser
         val uri = Uri.parse(
             "https://translate.google.com/?sl=auto&tl=en&text=${Uri.encode(text)}&op=translate"
         )
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, uri)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        )
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(flags))
         finish()
     }
 
@@ -723,7 +800,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         val body = TextView(this).apply {
-            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Use the action buttons"
+            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Use floating bar + bottom actions"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setTextColor(Color.parseColor("#3C4043"))
             setPadding(0, (16 * d).toInt(), 0, (24 * d).toInt())
