@@ -95,12 +95,12 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     private lateinit var highlightView: HighlightView
     private lateinit var chipsRow: LinearLayout
     private lateinit var bottom: LinearLayout
-    private lateinit var floatingBar: LinearLayout   // the dark pill bar
+    private lateinit var floatingBar: LinearLayout
 
     private val chrome = setOf(
         "google", "search", "ai", "mode", "all", "images", "videos", "shopping",
         "forums", "news", "maps", "more", "show more", "copy", "share", "ok",
-        "cancel", "settings", "home", "back", "lens"
+        "cancel", "settings", "home", "back", "lens", "ask", "imagine", "build"
     )
 
     override fun onShow(args: Bundle?, showFlags: Int) {
@@ -109,7 +109,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             computeSystemBars()
             buildOverlay()
             overlayReady = true
-            readyAt = SystemClock.uptimeMillis() + 400
+            readyAt = SystemClock.uptimeMillis() + 350
             pendingStructure?.let {
                 applyStructure(it)
                 pendingStructure = null
@@ -185,49 +185,68 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     }
 
     private fun traverse(node: AssistStructure.ViewNode?, parentX: Int, parentY: Int) {
-        if (node == null || node.visibility != View.VISIBLE) return
+        if (node == null) return
+        if (node.visibility != View.VISIBLE) return
+
         val x = parentX + node.left - node.scrollX
         val y = parentY + node.top - node.scrollY
+
         val raw = node.text?.toString()?.trim().orEmpty()
         val desc = node.contentDescription?.toString()?.trim().orEmpty()
-        val text = raw.ifBlank { desc }
-        val screenH = context.resources.displayMetrics.heightPixels
-        if (text.isNotBlank() && node.width > 12 && node.height > 12) {
-            val rect = Rect(x, y, x + node.width, y + node.height)
-            val tooLow = rect.bottom > screenH - navPad - 8
-            val tooHigh = rect.bottom < statusPad
-            if (!tooLow && !tooHigh) addTextPieces(text, rect)
+        val text = when {
+            raw.isNotBlank() -> raw
+            desc.isNotBlank() -> desc
+            else -> ""
         }
-        for (i in 0 until node.childCount) traverse(node.getChildAt(i), x, y)
+
+        val screenH = context.resources.displayMetrics.heightPixels
+        val screenW = context.resources.displayMetrics.widthPixels
+
+        if (text.isNotBlank() && node.width > 20 && node.height > 16) {
+            val rect = Rect(x, y, x + node.width, y + node.height)
+
+            // Skip system bars area
+            val tooLow = rect.bottom > screenH - navPad - 10
+            val tooHigh = rect.top < statusPad
+            val tooSide = rect.left < 0 || rect.right > screenW + 20
+
+            if (!tooLow && !tooHigh && !tooSide) {
+                addTextSmart(text, rect)
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            traverse(node.getChildAt(i), x, y)
+        }
     }
 
-    private fun addTextPieces(text: String, rect: Rect) {
-        val singleLine = rect.height() <= (40 * dp(context))
-        val lines = text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
-        if (!singleLine) {
-            if (lines.size > 1) {
-                val h = (rect.height() / lines.size).coerceAtLeast(20)
-                lines.forEachIndexed { i, line ->
+    // Improved: Prefer full sentences / paragraphs instead of always splitting into single words
+    private fun addTextSmart(text: String, rect: Rect) {
+        val clean = text.replace(Regex("\\s+"), " ").trim()
+        if (clean.length < 2) return
+
+        // If the text is short or looks like a sentence → keep as one item
+        val wordCount = clean.split(" ").size
+        val isProbablySentence = wordCount >= 3 || clean.contains(".") || clean.contains("?") || clean.contains("!")
+
+        if (isProbablySentence || wordCount <= 6) {
+            // Keep as one selectable block (much better for sentences)
+            textItems.add(ScreenTextItem(clean, Rect(rect)))
+            return
+        }
+
+        // Only split very long paragraphs into smaller chunks
+        val parts = clean.split(Regex("(?<=[.?!])\\s+"))
+        if (parts.size > 1) {
+            val h = (rect.height() / parts.size).coerceAtLeast(28)
+            parts.forEachIndexed { i, part ->
+                if (part.length >= 3) {
                     val top = rect.top + i * h
-                    addTextPieces(line, Rect(rect.left, top, rect.right, top + h))
+                    textItems.add(ScreenTextItem(part.trim(), Rect(rect.left, top, rect.right, top + h)))
                 }
-            } else {
-                textItems.add(ScreenTextItem(text, Rect(rect)))
             }
-            return
-        }
-        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (words.size <= 1) {
-            textItems.add(ScreenTextItem(text, Rect(rect)))
-            return
-        }
-        val total = words.sumOf { it.length }.coerceAtLeast(1)
-        var offset = 0
-        for (w in words) {
-            val wpx = (rect.width() * (w.length.toFloat() / total)).toInt().coerceAtLeast(28)
-            val left = rect.left + offset
-            textItems.add(ScreenTextItem(w, Rect(left, rect.top, left + wpx, rect.bottom)))
-            offset += wpx
+        } else {
+            textItems.add(ScreenTextItem(clean, Rect(rect)))
         }
     }
 
@@ -265,7 +284,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         }
         root.addView(highlightView)
 
-        // Close button
+        // Close
         val close = TextView(context).apply {
             text = "✕"
             setTextColor(Color.WHITE)
@@ -292,7 +311,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             }
         )
 
-        // ========== FLOATING DARK PILL BAR (like Circle to Search) ==========
+        // ========== FLOATING DARK PILL BAR ==========
         floatingBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -301,7 +320,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
                 setColor(Color.parseColor("#2C2C2E"))
                 cornerRadius = 50f
             }
-            elevation = 20f
+            elevation = 24f
             visibility = View.GONE
         }
 
@@ -328,11 +347,11 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
-                topMargin = statusPad + (60 * d).toInt()
+                topMargin = statusPad + (70 * d).toInt()
             }
         )
 
-        // ========== BOTTOM PANEL (your original style) ==========
+        // ========== BOTTOM PANEL ==========
         chipsRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -378,7 +397,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             setBackgroundColor(Color.WHITE)
             elevation = 16f
             addView(TextView(context).apply {
-                text = "Tap words to select • Floating bar + full actions below"
+                text = "Tap sentences or words • Floating bar appears when selected"
                 setTextColor(Color.parseColor("#5F6368"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (4 * d).toInt())
@@ -443,9 +462,12 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     private fun onTap(x: Int, y: Int) {
         val screenH = root.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
         if (y > screenH - bottom.height) return
+
+        // Prefer the largest matching text block under the finger (better for sentences)
         val hit = textItems
             .filter { it.rect.contains(x, y) }
-            .minByOrNull { it.rect.width() * it.rect.height().coerceAtLeast(1) }
+            .maxByOrNull { it.rect.width() * it.rect.height() }
+
         if (hit != null) toggle(hit)
     }
 
@@ -468,8 +490,6 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     private fun refreshUi() {
         if (::highlightView.isInitialized) highlightView.invalidate()
         refreshChips()
-
-        // Show / hide the floating dark pill bar
         if (::floatingBar.isInitialized) {
             floatingBar.visibility = if (selected.isNotEmpty()) View.VISIBLE else View.GONE
         }
@@ -483,11 +503,11 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         val chips = ArrayList<ScreenTextItem>()
         for (item in textItems) {
             val t = item.text.trim()
-            if (t.length < 2 || t.length > 42) continue
+            if (t.length < 2 || t.length > 60) continue
             if (isChrome(t)) continue
             if (!t.any { it.isLetter() }) continue
             if (unique.add(t)) chips.add(item)
-            if (chips.size >= 16) break
+            if (chips.size >= 14) break
         }
         if (chips.isEmpty()) {
             chipsRow.addView(TextView(context).apply {
@@ -500,7 +520,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         for (item in chips) {
             val chosen = selected.any { it.text == item.text }
             val chip = TextView(context).apply {
-                text = item.text
+                text = if (item.text.length > 28) item.text.take(26) + "…" else item.text
                 minHeight = (40 * d).toInt()
                 gravity = Gravity.CENTER
                 setTextColor(if (chosen) Color.WHITE else Color.parseColor("#202124"))
@@ -694,7 +714,6 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         searchGoogle("fact check $text")
     }
 
-    // Improved Translate → prefers Google app / Google Translate
     private fun translateSelected() {
         val text = selectedQuery()
         if (text.isBlank()) {
@@ -704,36 +723,35 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
 
         val flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
 
-        // 1. Try Google Translate app
-        val translateApp = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
-            setPackage("com.google.android.apps.translate")
-            addFlags(flags)
-        }
-
-        // 2. Try Google app search for translation
-        val googleSearch = Intent(Intent.ACTION_WEB_SEARCH).apply {
-            putExtra(SearchManager.QUERY, "translate $text")
-            setPackage("com.google.android.googlequicksearchbox")
-            addFlags(flags)
-        }
-
+        // Prefer Google Translate app
         try {
-            context.startActivity(translateApp)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+                setPackage("com.google.android.apps.translate")
+                addFlags(flags)
+            }
+            context.startActivity(intent)
             finish()
             return
         } catch (_: Exception) {
         }
 
+        // Prefer Google app
         try {
-            context.startActivity(googleSearch)
+            context.startActivity(
+                Intent(Intent.ACTION_WEB_SEARCH).apply {
+                    putExtra(SearchManager.QUERY, "translate $text")
+                    setPackage("com.google.android.googlequicksearchbox")
+                    addFlags(flags)
+                }
+            )
             finish()
             return
         } catch (_: Exception) {
         }
 
-        // Fallback to browser
+        // Fallback browser
         val uri = Uri.parse(
             "https://translate.google.com/?sl=auto&tl=en&text=${Uri.encode(text)}&op=translate"
         )
@@ -800,7 +818,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         val body = TextView(this).apply {
-            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Use floating bar + bottom actions"
+            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap sentences or words\n4. Use floating bar + bottom actions"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setTextColor(Color.parseColor("#3C4043"))
             setPadding(0, (16 * d).toInt(), 0, (24 * d).toInt())
