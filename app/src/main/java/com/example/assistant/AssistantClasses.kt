@@ -69,10 +69,9 @@ class ClipboardActivity : Activity() {
         const val EXTRA_TEXT = "text"
         fun copy(context: Context, text: String) {
             context.startActivity(
-                Intent(context, ClipboardActivity::class.java).apply {
-                    putExtra(EXTRA_TEXT, text)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
+                Intent(context, ClipboardActivity::class.java)
+                    .putExtra(EXTRA_TEXT, text)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
     }
@@ -80,21 +79,21 @@ class ClipboardActivity : Activity() {
 
 data class ScreenTextItem(val text: String, val rect: Rect)
 
-class CustomSession(context: Context) : VoiceInteractionSession(context) {
-
-    private val textItems = ArrayList<ScreenTextItem>()
-    private val selected = LinkedHashSet<ScreenTextItem>()
-    private var overlayReady = false
-    private var readyAt = 0L
-    private var pendingStructure: AssistStructure? = null
-    private var screenshot: Bitmap? = null
-    private var navPad = 0
-    private var statusPad = 0
+class CustomSession(service: VoiceInteractionSessionService) : VoiceInteractionSession(service) {
 
     private lateinit var root: FrameLayout
     private lateinit var highlightView: HighlightView
     private lateinit var chipsRow: LinearLayout
-    private lateinit var bottom: LinearLayout
+    private lateinit var actionBar: LinearLayout
+
+    private var screenshot: Bitmap? = null
+    private val textItems = mutableListOf<ScreenTextItem>()
+    private val selected = mutableListOf<ScreenTextItem>()
+    private var pendingStructure: AssistStructure? = null
+    private var overlayReady = false
+    private var readyAt = 0L
+    private var navPad = 0
+    private var statusPad = 0
 
     private val chrome = setOf(
         "google", "search", "ai", "mode", "all", "images", "videos", "shopping",
@@ -164,31 +163,28 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
                     if (insets.stableInsetTop > 0) statusPad = insets.stableInsetTop
                 }
             }
-        } catch (_: Exception) {
-        }
-        navPad = maxOf(navPad, (28 * dp(context)).toInt())
+        } catch (_: Throwable) {}
     }
-
-    private fun dp(ctx: Context) = ctx.resources.displayMetrics.density
 
     private fun applyStructure(structure: AssistStructure?) {
         textItems.clear()
         selected.clear()
-        structure?.let { struct ->
-            for (i in 0 until struct.windowNodeCount) {
-                val w = struct.getWindowNodeAt(i)
-                traverse(w.rootViewNode, w.left, w.top)
-            }
+        if (structure == null) {
+            refreshUi()
+            return
+        }
+        for (i in 0 until structure.windowNodeCount) {
+            val window = structure.getWindowNodeAt(i)
+            traverse(window.rootViewNode, 0, 0)
         }
         refreshUi()
     }
 
-    private fun traverse(node: AssistStructure.ViewNode?, parentX: Int, parentY: Int) {
-        if (node == null || node.visibility != View.VISIBLE) return
-        val x = parentX + node.left - node.scrollX
-        val y = parentY + node.top - node.scrollY
-        val raw = node.text?.toString()?.trim().orEmpty()
-        val desc = node.contentDescription?.toString()?.trim().orEmpty()
+    private fun traverse(node: AssistStructure.ViewNode, parentX: Int, parentY: Int) {
+        val x = parentX + node.left
+        val y = parentY + node.top
+        val raw = node.text?.toString().orEmpty()
+        val desc = node.contentDescription?.toString().orEmpty()
         val text = raw.ifBlank { desc }
         val screenH = context.resources.displayMetrics.heightPixels
         if (text.isNotBlank() && node.width > 12 && node.height > 12) {
@@ -264,6 +260,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
         }
         root.addView(highlightView)
 
+        // Close button
         val close = TextView(context).apply {
             text = "✕"
             setTextColor(Color.WHITE)
@@ -290,6 +287,7 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             }
         )
 
+        // Chips row (suggested words)
         chipsRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -299,93 +297,70 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
             addView(chipsRow)
         }
 
-        val actions = LinearLayout(context).apply {
+        // Floating action bar (Copy / Share / Translate / Explain / All / Cancel)
+        actionBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, (10 * d).toInt(), 0, 0)
-            addView(roundAction("Copy", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                copySelected()
-            })
-            addView(gap(d))
-            addView(roundAction("Lens", Color.parseColor("#1A73E8"), Color.WHITE) {
-                openLensInFront()
-            })
-            addView(gap(d))
-            addView(roundAction("Search", Color.parseColor("#E8F0FE"), Color.parseColor("#1A73E8")) {
-                searchGoogle(selectedQuery())
+            setPadding((8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt())
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#2C2C2E"))
+                cornerRadius = 50f
+            }
+            elevation = 16f
+            visibility = View.GONE
+        }
+
+        fun makePill(label: String, onClick: () -> Unit): TextView {
+            return TextView(context).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding((14 * d).toInt(), (10 * d).toInt(), (14 * d).toInt(), (10 * d).toInt())
+                setOnClickListener { onClick() }
+            }
+        }
+
+        actionBar.addView(makePill("Copy") { copySelected() })
+        actionBar.addView(makePill("Share") { shareSelected() })
+        actionBar.addView(makePill("Translate") { translateSelected() })
+        actionBar.addView(makePill("Explain") { explainSelected() })
+        actionBar.addView(makePill("All") { selectAllVisible() })
+        actionBar.addView(makePill("Cancel") { clearSelection() })
+
+        // Bottom container
+        val bottom = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), 0)
+            addView(chipsScroll)
+            addView(actionBar, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (12 * d).toInt()
+                gravity = Gravity.CENTER_HORIZONTAL
             })
         }
 
-        bottom = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
-            elevation = 16f
-            addView(TextView(context).apply {
-                text = "Tap words to select, then Copy / Lens / Search"
-                setTextColor(Color.parseColor("#5F6368"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                setPadding((16 * d).toInt(), (10 * d).toInt(), (16 * d).toInt(), (4 * d).toInt())
-            })
-            addView(
-                chipsScroll,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    leftMargin = (12 * d).toInt()
-                    rightMargin = (12 * d).toInt()
-                }
-            )
-            addView(actions)
-        }
-        applyBottomPadding()
         root.addView(
             bottom,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.BOTTOM }
+            ).apply {
+                gravity = Gravity.BOTTOM
+                bottomMargin = navPad + (16 * d).toInt()
+            }
         )
 
         setContentView(root)
-        root.requestApplyInsets()
     }
 
     private fun applyBottomPadding() {
-        if (!::bottom.isInitialized) return
-        val d = dp(context)
-        bottom.setPadding(
-            (12 * d).toInt(),
-            (4 * d).toInt(),
-            (12 * d).toInt(),
-            navPad + (12 * d).toInt()
-        )
-    }
-
-    private fun gap(d: Float) = View(context).apply {
-        layoutParams = LinearLayout.LayoutParams((8 * d).toInt(), 1)
-    }
-
-    private fun roundAction(label: String, bg: Int, fg: Int, onClick: () -> Unit): TextView {
-        val d = dp(context)
-        return TextView(context).apply {
-            text = label
-            setTextColor(fg)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            gravity = Gravity.CENTER
-            minHeight = (44 * d).toInt()
-            setPadding((20 * d).toInt(), (10 * d).toInt(), (20 * d).toInt(), (10 * d).toInt())
-            background = GradientDrawable().apply {
-                setColor(bg)
-                cornerRadius = 40f
-            }
-            setOnClickListener { onClick() }
-        }
+        // kept for future use
     }
 
     private fun onTap(x: Int, y: Int) {
-        val screenH = root.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
-        if (y > screenH - bottom.height) return
         val hit = textItems
             .filter { it.rect.contains(x, y) }
             .minByOrNull { it.rect.width() * it.rect.height().coerceAtLeast(1) }
@@ -411,6 +386,9 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
     private fun refreshUi() {
         if (::highlightView.isInitialized) highlightView.invalidate()
         refreshChips()
+        if (::actionBar.isInitialized) {
+            actionBar.visibility = if (selected.isNotEmpty()) View.VISIBLE else View.GONE
+        }
     }
 
     private fun refreshChips() {
@@ -450,114 +428,124 @@ class CustomSession(context: Context) : VoiceInteractionSession(context) {
                 }
                 setOnClickListener { selectFromChip(item) }
             }
-            chipsRow.addView(
-                chip,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { rightMargin = (8 * d).toInt() }
-            )
+            chipsRow.addView(chip)
+            chipsRow.addView(View(context).apply {
+                layoutParams = LinearLayout.LayoutParams((6 * d).toInt(), 1)
+            })
         }
     }
 
+    // ───────── Actions ─────────
+
     private fun copySelected() {
-        val q = selectedQuery()
-        if (q.isBlank()) {
-            Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
-            return
+        val text = selectedQuery()
+        if (text.isBlank()) return
+        ClipboardActivity.copy(context, text)
+        finish()
+    }
+
+    private fun shareSelected() {
+        val text = selectedQuery()
+        if (text.isBlank()) return
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(
+            Intent.createChooser(intent, "Share")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        finish()
+    }
+
+    private fun translateSelected() {
+        val text = selectedQuery()
+        if (text.isBlank()) return
+        val uri = Uri.parse(
+            "https://translate.google.com/?sl=auto&tl=en&text=${Uri.encode(text)}&op=translate"
+        )
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        finish()
+    }
+
+    private fun explainSelected() {
+        val text = selectedQuery()
+        if (text.isBlank()) return
+        val query = "explain $text"
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra(SearchManager.QUERY, query)
+            setPackage("com.google.android.googlequicksearchbox")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         try {
-            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("Quick Assistant", q))
+            context.startActivity(intent)
         } catch (_: Exception) {
+            val uri = Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
         }
-        ClipboardActivity.copy(context, q)
+        finish()
+    }
+
+    private fun selectAllVisible() {
+        selected.clear()
+        selected.addAll(textItems.filter { !isChrome(it.text) })
+        refreshUi()
+    }
+
+    private fun clearSelection() {
+        selected.clear()
+        refreshUi()
     }
 
     private fun openLensInFront() {
-        val bmp = screenshot
-        val launched = if (bmp != null && !bmp.isRecycled) shareToLens(bmp) else openBareLens()
-        if (!launched) {
+        val bmp = screenshot ?: return
+        try {
+            val file = File(context.cacheDir, "lens_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { out ->
+                bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "com.example.assistant.files",
+                file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/*"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                setPackage("com.google.android.googlequicksearchbox")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
             Toast.makeText(context, "Could not open Google Lens", Toast.LENGTH_SHORT).show()
-            return
         }
         finish()
-    }
-
-    private fun shareToLens(bmp: Bitmap): Boolean {
-        return try {
-            val file = File(context.cacheDir, "qa_lens.png")
-            FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 95, it) }
-            val uri = FileProvider.getUriForFile(context, "com.example.assistant.files", file)
-            val flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            val send = Intent(Intent.ACTION_SEND).apply {
-                type = "image/png"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(flags)
-                setPackage("com.google.android.googlequicksearchbox")
-            }
-            try {
-                context.startActivity(send)
-            } catch (_: Exception) {
-                context.startActivity(
-                    Intent.createChooser(
-                        Intent(Intent.ACTION_SEND).apply {
-                            type = "image/png"
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        },
-                        "Open with Lens"
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                )
-            }
-            true
-        } catch (_: Exception) {
-            openBareLens()
-        }
-    }
-
-    private fun openBareLens(): Boolean {
-        val flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        val tries = listOf(
-            Intent(Intent.ACTION_VIEW, Uri.parse("google://lens")).apply {
-                setPackage("com.google.android.googlequicksearchbox")
-                addFlags(flags)
-            },
-            Intent(Intent.ACTION_VIEW, Uri.parse("https://lens.google.com")).addFlags(flags)
-        )
-        for (intent in tries) {
-            try {
-                context.startActivity(intent)
-                return true
-            } catch (_: Exception) {
-            }
-        }
-        return false
     }
 
     private fun searchGoogle(query: String) {
-        if (query.isBlank()) {
-            Toast.makeText(context, "Select text first", Toast.LENGTH_SHORT).show()
-            return
+        if (query.isBlank()) return
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra(SearchManager.QUERY, query)
+            setPackage("com.google.android.googlequicksearchbox")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         try {
-            context.startActivity(
-                Intent(Intent.ACTION_WEB_SEARCH).apply {
-                    putExtra(SearchManager.QUERY, query)
-                    addFlags(flags)
-                }
-            )
+            context.startActivity(intent)
         } catch (_: Exception) {
+            val uri = Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")
             context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(query)))
-                    .addFlags(flags)
+                Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
         finish()
     }
+
+    private fun dp(context: Context) = context.resources.displayMetrics.density
 
     class HighlightView(
         context: Context,
@@ -601,7 +589,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         }
         val body = TextView(this).apply {
-            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Copy, Lens, or Search"
+            text = "1. Set as default assistant\n2. Long-press Home\n3. Tap words\n4. Use the action bar"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             setTextColor(Color.parseColor("#3C4043"))
             setPadding(0, (16 * d).toInt(), 0, (24 * d).toInt())
